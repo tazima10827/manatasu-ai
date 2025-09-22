@@ -239,4 +239,13 @@ class ProblemGeneratorProvider extends ChangeNotifier {
     _generatedPdfBytes = null;
     notifyListeners();
   }
+
+  void clearForNewGeneration() {
+    _isLoading = false;
+    _uploadedPDF = null;
+    _params = null;
+    _errorMessage = null;
+    _generatedPdfBytes = null;
+    notifyListeners();
+  }
 }
