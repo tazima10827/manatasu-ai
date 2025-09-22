@@ -54,19 +54,25 @@ class _GenerationFormWidgetState extends State<GenerationFormWidget> {
   ];
 
   void _updateParams() {
-    if (_formKey.currentState!.validate()) {
-      _formKey.currentState!.save();
-      final params = ProblemGenerationParams(
-        subject: _subject,
-        grade: _grade,
-        difficulty: _difficulty,
-        problemCount: _problemCount,
-        problemType: _problemType,
-        specificTopic: _specificTopic,
-        additionalInstructions: _additionalInstructions,
-      );
-      widget.onParamsChanged(params);
-    }
+    final params = ProblemGenerationParams(
+      subject: _subject,
+      grade: _grade,
+      difficulty: _difficulty,
+      problemCount: _problemCount,
+      problemType: _problemType,
+      specificTopic: _specificTopic,
+      additionalInstructions: _additionalInstructions,
+    );
+    widget.onParamsChanged(params);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 初期パラメータを設定
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _updateParams();
+    });
   }
 
   @override

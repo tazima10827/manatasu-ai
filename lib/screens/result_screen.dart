@@ -100,24 +100,33 @@ class _ResultScreenState extends State<ResultScreen> {
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) => const AddMoreProblemsDialog(),
-                    );
-                  },
-                  icon: const Icon(Icons.add_circle_outline),
-                  label: const Text('問題を追加'),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: () {
-                    provider.reset();
-                    context.go('/');
-                  },
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('新しく作成'),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.swipe,
+                      size: 16,
+                      color: Colors.grey[600],
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'カードを右方向にスワイプで削除できます',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => const AddMoreProblemsDialog(),
+                        );
+                      },
+                      icon: const Icon(Icons.add_circle_outline),
+                      label: const Text('問題を追加'),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -140,167 +149,191 @@ class _ResultScreenState extends State<ResultScreen> {
                     },
                     itemBuilder: (context, index) {
                       final problem = provider.generatedProblems[index];
-                      return Card(
-                        key: ValueKey(problem.id),
-                        margin: const EdgeInsets.only(bottom: 16),
-                        child: ExpansionTile(
-                          key: ValueKey('expansion_${problem.id}'),
-                          initiallyExpanded: true,
-                          title: Row(
+                      return Dismissible(
+                        key: ValueKey('dismiss_${problem.id}'),
+                        direction: DismissDirection.startToEnd,
+                        background: Container(
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                              Icon(
+                                Icons.delete,
+                                color: Colors.white,
+                                size: 32,
+                              ),
+                              SizedBox(width: 8),
+                              Text(
+                                '削除',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          return await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: const Text('問題を削除'),
+                              content: Text('問題 ${index + 1} を削除しますか？'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(false),
+                                  child: const Text('キャンセル'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.of(context).pop(true),
+                                  child: const Text('削除', style: TextStyle(color: Colors.red)),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                        onDismissed: (direction) {
+                          provider.removeProblem(index);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('問題 ${index + 1} を削除しました'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        },
+                        child: Card(
+                          key: ValueKey(problem.id),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
                                   children: [
-                                    Row(
-                                      children: [
-                                        Icon(Icons.drag_handle, color: Colors.grey[600]),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '問題 ${index + 1}',
-                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
+                                    Icon(Icons.drag_handle, color: Colors.grey[600]),
+                                    const SizedBox(width: 8),
                                     Text(
-                                      problem.question,
-                                      style: const TextStyle(fontSize: 14, color: Colors.black87),
+                                      '問題 ${index + 1}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                                     ),
-                                    const SizedBox(height: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Text(
-                                        '正解: ${problem.answer}',
-                                        style: TextStyle(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w500,
-                                          color: Theme.of(context).colorScheme.primary,
-                                        ),
+                                    const Spacer(),
+                                    Text(
+                                      '← スワイプで削除',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey[600],
                                       ),
                                     ),
                                   ],
                                 ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.close, color: Colors.red),
-                                onPressed: () {
-                                  showDialog(
-                                    context: context,
-                                    builder: (context) => AlertDialog(
-                                      title: const Text('問題を削除'),
-                                      content: Text('問題 ${index + 1} を削除しますか？'),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () => Navigator.of(context).pop(),
-                                          child: const Text('キャンセル'),
-                                        ),
-                                        TextButton(
-                                          onPressed: () {
-                                            provider.removeProblem(index);
-                                            Navigator.of(context).pop();
-                                          },
-                                          child: const Text('削除', style: TextStyle(color: Colors.red)),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                                tooltip: '問題を削除',
-                              ),
-                            ],
-                          ),
-                          subtitle: Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Row(
-                              children: [
-                                Chip(
-                                  label: Text(problem.subject),
-                                  backgroundColor: Theme.of(context)
-                                      .colorScheme
-                                      .primaryContainer,
+                                const SizedBox(height: 12),
+                                Text(
+                                  problem.question,
+                                  style: const TextStyle(fontSize: 14, color: Colors.black87),
                                 ),
-                                const SizedBox(width: 8),
-                                Chip(
-                                  label: Text(problem.difficulty),
-                                  backgroundColor: _getDifficultyColor(problem.difficulty),
+                                const SizedBox(height: 12),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.7),
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    '正解: ${problem.answer}',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Chip(
+                                      label: Text(problem.subject),
+                                      backgroundColor: Theme.of(context)
+                                          .colorScheme
+                                          .primaryContainer,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Chip(
+                                      label: Text(problem.difficulty),
+                                      backgroundColor: _getDifficultyColor(problem.difficulty),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                if (problem.choices != null && problem.choices!.isNotEmpty) ...[
+                                  const Text(
+                                    '選択肢:',
+                                    style: TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ...problem.choices!.asMap().entries.map((entry) {
+                                    return Padding(
+                                      padding: const EdgeInsets.only(left: 16, bottom: 4),
+                                      child: Text('${entry.key + 1}. ${entry.value}'),
+                                    );
+                                  }).toList(),
+                                  const SizedBox(height: 16),
+                                ],
+                                const Text(
+                                  '解説:',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(problem.explanation),
+                                const SizedBox(height: 16),
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[100],
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey[300]!),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.source, size: 16),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              '出典情報',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              'ファイル: ${problem.sourceFile} | ページ: ${problem.sourcePage}',
+                                              style: const TextStyle(fontSize: 11),
+                                            ),
+                                            if (problem.sourceUri != null)
+                                              Text(
+                                                'URI: ${problem.sourceUri}',
+                                                style: const TextStyle(fontSize: 11),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
                           ),
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  if (problem.choices != null && problem.choices!.isNotEmpty) ...[
-                                    const Text(
-                                      '選択肢:',
-                                      style: TextStyle(fontWeight: FontWeight.bold),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ...problem.choices!.asMap().entries.map((entry) {
-                                      return Padding(
-                                        padding: const EdgeInsets.only(left: 16, bottom: 4),
-                                        child: Text('${entry.key + 1}. ${entry.value}'),
-                                      );
-                                    }).toList(),
-                                    const SizedBox(height: 16),
-                                  ],
-                                  const Text(
-                                    '解説:',
-                                    style: TextStyle(fontWeight: FontWeight.bold),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(problem.explanation),
-                                  const SizedBox(height: 16),
-                                  Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[100],
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.grey[300]!),
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        const Icon(Icons.source, size: 16),
-                                        const SizedBox(width: 8),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              const Text(
-                                                '出典情報',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                'ファイル: ${problem.sourceFile} | ページ: ${problem.sourcePage}',
-                                                style: const TextStyle(fontSize: 11),
-                                              ),
-                                              if (problem.sourceUri != null)
-                                                Text(
-                                                  'URI: ${problem.sourceUri}',
-                                                  style: const TextStyle(fontSize: 11),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
                         ),
                       );
                     },

@@ -15,7 +15,7 @@ class AddMoreProblemsDialog extends StatefulWidget {
 class _AddMoreProblemsDialogState extends State<AddMoreProblemsDialog> {
   PlatformFile? _additionalPDF;
   ProblemGenerationParams? _params;
-  bool _useOriginalPDF = true;
+  bool _useOriginalPDF = false;
 
   Future<void> _uploadAdditionalPDF() async {
     try {
@@ -85,70 +85,86 @@ class _AddMoreProblemsDialogState extends State<AddMoreProblemsDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'PDF選択',
+                      'PDFアップロード',
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 8),
-                    RadioListTile<bool>(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
-                      title: const Text('元のPDFを使用'),
-                      subtitle: Text(provider.uploadedPDF?.name ?? ''),
-                      value: true,
-                      groupValue: _useOriginalPDF,
-                      onChanged: (value) {
-                        setState(() {
-                          _useOriginalPDF = value!;
-                          if (_useOriginalPDF) {
-                            _additionalPDF = null;
-                          }
-                        });
-                      },
+                    const Text(
+                      '問題を追加するには新しいPDFファイルをアップロードしてください',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
                     ),
-                    RadioListTile<bool>(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
-                      title: const Text('新しいPDFを使用'),
-                      subtitle: _additionalPDF != null
-                          ? Text(_additionalPDF!.name)
-                          : const Text('PDFファイルを選択してください'),
-                      value: false,
-                      groupValue: _useOriginalPDF,
-                      onChanged: (value) {
-                        setState(() {
-                          _useOriginalPDF = value!;
-                        });
-                      },
-                    ),
-                    if (!_useOriginalPDF) ...[
-                      const SizedBox(height: 8),
-                      if (_additionalPDF == null)
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: _uploadAdditionalPDF,
-                            icon: const Icon(Icons.upload_file),
-                            label: const Text('PDFファイルを選択'),
+                    const SizedBox(height: 16),
+                    if (_additionalPDF == null)
+                      Container(
+                        width: double.infinity,
+                        height: 100,
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary.withOpacity(0.5),
+                            width: 2,
                           ),
-                        )
-                      else
-                        Row(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: InkWell(
+                          onTap: _uploadAdditionalPDF,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.cloud_upload_outlined,
+                                size: 32,
+                                color: Theme.of(context).colorScheme.primary.withOpacity(0.6),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text('クリックしてPDFをアップロード'),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Row(
                           children: [
                             Icon(
                               Icons.picture_as_pdf,
                               color: Theme.of(context).colorScheme.primary,
+                              size: 32,
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 12),
                             Expanded(
-                              child: Text(_additionalPDF!.name),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _additionalPDF!.name,
+                                    style: const TextStyle(fontWeight: FontWeight.w500),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    '${(_additionalPDF!.size / 1024).toStringAsFixed(2)} KB',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                  ),
+                                ],
+                              ),
                             ),
-                            TextButton(
+                            TextButton.icon(
                               onPressed: _clearAdditionalPDF,
-                              child: const Text('変更'),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('変更'),
                             ),
                           ],
                         ),
-                    ],
+                      ),
                   ],
                 ),
               ),
@@ -198,11 +214,11 @@ class _AddMoreProblemsDialogState extends State<AddMoreProblemsDialog> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: provider.isLoading || _params == null || (!_useOriginalPDF && _additionalPDF == null)
+                    onPressed: provider.isLoading || _params == null || _additionalPDF == null
                         ? null
                         : () async {
                             await provider.addMoreProblems(
-                              additionalPDF: _useOriginalPDF ? null : _additionalPDF,
+                              additionalPDF: _additionalPDF,
                               params: _params!,
                             );
 
