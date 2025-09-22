@@ -1,0 +1,253 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../models/problem_generation_params.dart';
+
+class GenerationFormWidget extends StatefulWidget {
+  final Function(ProblemGenerationParams) onParamsChanged;
+
+  const GenerationFormWidget({
+    super.key,
+    required this.onParamsChanged,
+  });
+
+  @override
+  State<GenerationFormWidget> createState() => _GenerationFormWidgetState();
+}
+
+class _GenerationFormWidgetState extends State<GenerationFormWidget> {
+  final _formKey = GlobalKey<FormState>();
+
+  String _subject = '数学';
+  String _grade = '中学1年';
+  String _difficulty = '標準';
+  int _problemCount = 10;
+  String _problemType = '選択問題';
+  String? _specificTopic;
+  String? _additionalInstructions;
+
+  final List<String> _subjects = [
+    '数学',
+    '国語',
+    '英語',
+    '理科',
+    '社会',
+  ];
+
+  final List<String> _grades = [
+    '中学1年',
+    '中学2年',
+    '中学3年',
+  ];
+
+  final List<String> _difficulties = [
+    '簡単',
+    '標準',
+    '難しい',
+  ];
+
+  final List<String> _problemTypes = [
+    '選択問題',
+    '記述問題',
+    '計算問題',
+    '論述問題',
+    '穴埋め問題',
+  ];
+
+  void _updateParams() {
+    if (_formKey.currentState!.validate()) {
+      _formKey.currentState!.save();
+      final params = ProblemGenerationParams(
+        subject: _subject,
+        grade: _grade,
+        difficulty: _difficulty,
+        problemCount: _problemCount,
+        problemType: _problemType,
+        specificTopic: _specificTopic,
+        additionalInstructions: _additionalInstructions,
+      );
+      widget.onParamsChanged(params);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Form(
+      key: _formKey,
+      onChanged: _updateParams,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _subject,
+                    decoration: const InputDecoration(
+                      labelText: '教科',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.book),
+                    ),
+                    items: _subjects.map((subject) {
+                      return DropdownMenuItem(
+                        value: subject,
+                        child: Text(subject),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _subject = value!;
+                      });
+                      _updateParams();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _grade,
+                    decoration: const InputDecoration(
+                      labelText: '学年',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.school),
+                    ),
+                    items: _grades.map((grade) {
+                      return DropdownMenuItem(
+                        value: grade,
+                        child: Text(grade),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _grade = value!;
+                      });
+                      _updateParams();
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: _difficulty,
+                    decoration: const InputDecoration(
+                      labelText: '難易度',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.trending_up),
+                    ),
+                    items: _difficulties.map((difficulty) {
+                      return DropdownMenuItem(
+                        value: difficulty,
+                        child: Text(difficulty),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _difficulty = value!;
+                      });
+                      _updateParams();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: TextFormField(
+                    initialValue: _problemCount.toString(),
+                    decoration: const InputDecoration(
+                      labelText: '問題数',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.format_list_numbered),
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return '問題数を入力してください';
+                      }
+                      final count = int.tryParse(value);
+                      if (count == null || count < 1 || count > 50) {
+                        return '1〜50の範囲で入力してください';
+                      }
+                      return null;
+                    },
+                    onSaved: (value) {
+                      _problemCount = int.parse(value!);
+                    },
+                    onChanged: (value) {
+                      if (value.isNotEmpty) {
+                        final count = int.tryParse(value);
+                        if (count != null && count >= 1 && count <= 50) {
+                          _problemCount = count;
+                          _updateParams();
+                        }
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              value: _problemType,
+              decoration: const InputDecoration(
+                labelText: '問題形式',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.quiz),
+              ),
+              items: _problemTypes.map((type) {
+                return DropdownMenuItem(
+                  value: type,
+                  child: Text(type),
+                );
+              }).toList(),
+              onChanged: (value) {
+                setState(() {
+                  _problemType = value!;
+                });
+                _updateParams();
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              decoration: const InputDecoration(
+                labelText: '特定のトピック（任意）',
+                hintText: '例：二次方程式、古文、化学反応式など',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.topic),
+              ),
+              maxLines: 1,
+              onSaved: (value) {
+                _specificTopic = value?.isNotEmpty == true ? value : null;
+              },
+              onChanged: (value) {
+                _specificTopic = value.isNotEmpty ? value : null;
+                _updateParams();
+              },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              decoration: const InputDecoration(
+                labelText: '追加指示（任意）',
+                hintText: '例：図表を含む問題を作成、基礎的な問題のみなど',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.note_add),
+              ),
+              maxLines: 3,
+              onSaved: (value) {
+                _additionalInstructions = value?.isNotEmpty == true ? value : null;
+              },
+              onChanged: (value) {
+                _additionalInstructions = value.isNotEmpty ? value : null;
+                _updateParams();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
