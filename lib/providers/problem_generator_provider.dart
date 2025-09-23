@@ -31,6 +31,24 @@ class ProblemGeneratorProvider extends ChangeNotifier {
 
   final ApiService _apiService = ApiService();
 
+  Future<Uint8List> _generateBlankPDF() async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Center(
+            child: pw.Text(
+              '',
+              style: const pw.TextStyle(fontSize: 12),
+            ),
+          );
+        },
+      ),
+    );
+    return await pdf.save();
+  }
+
   Future<void> uploadPDF() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -83,9 +101,10 @@ class ProblemGeneratorProvider extends ChangeNotifier {
             params: _params!,
           );
         } else {
-          // PDFがない場合は空のPDFバイトを送信
+          // PDFがない場合は白紙のPDFを送信
+          final blankPdfBytes = await _generateBlankPDF();
           _generatedProblems = await _apiService.generateProblems(
-            pdfBytes: Uint8List(0),
+            pdfBytes: blankPdfBytes,
             params: _params!,
           );
         }
@@ -135,7 +154,7 @@ class ProblemGeneratorProvider extends ChangeNotifier {
           );
         }
       } else {
-        final pdfBytes = additionalPDF?.bytes ?? _uploadedPDF!.bytes!;
+        final pdfBytes = additionalPDF?.bytes ?? _uploadedPDF?.bytes ?? await _generateBlankPDF();
         newProblems = await _apiService.generateProblems(
           pdfBytes: pdfBytes,
           params: params,
