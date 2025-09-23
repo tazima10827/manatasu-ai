@@ -3,7 +3,7 @@ class Config {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'https://manatasu-ai-backend-676pzc6mla-an.a.run.app/api',
+    defaultValue: 'http://localhost:8080/api',
   );
 
   static const String apiKey = String.fromEnvironment(

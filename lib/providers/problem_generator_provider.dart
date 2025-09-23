@@ -1,8 +1,13 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import '../models/problem_generation_params.dart';
 import '../models/generated_problem.dart';
 import '../services/api_service.dart';
@@ -142,18 +147,50 @@ class ProblemGeneratorProvider extends ChangeNotifier {
   Future<void> _generatePDF() async {
     final pdf = pw.Document();
 
+    // ShipporiMincho-Bold.ttfを使用
+    pw.Font font;
+    pw.Font fontBold;
+
+    // デフォルトフォントで初期化
+    font = pw.Font.helvetica();
+    fontBold = pw.Font.helveticaBold();
+
+    // Webとモバイルの両方でShipporiMincho-Bold.ttfを使用
+    try {
+      final fontData = await rootBundle.load('assets/fonts/ShipporiMincho-Bold.ttf');
+      // 正しいByteData変換を使用
+      final fontBytes = fontData.buffer.asUint8List();
+      final byteData = ByteData.sublistView(fontBytes);
+      font = pw.Font.ttf(byteData);
+      fontBold = pw.Font.ttf(byteData);
+      print('ShipporiMincho-Bold.ttf font loaded successfully');
+    } catch (e) {
+      print('Font loading error: $e');
+      // フォント読み込みに失敗した場合のフォールバック（既に設定済み）
+    }
+
+    // Web環境での日本語文字変換関数
+    String convertJapaneseForWeb(String text) {
+      // 英語変換を無効化して日本語をそのまま返す
+      return text;
+    }
+
     for (var i = 0; i < _generatedProblems.length; i++) {
       final problem = _generatedProblems[i];
 
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
+          theme: pw.ThemeData.withFont(
+            base: font,
+            bold: fontBold,
+          ),
           build: (pw.Context context) {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  '問題 ${i + 1}',
+                  convertJapaneseForWeb('問題 ${i + 1}'),
                   style: pw.TextStyle(
                     fontSize: 18,
                     fontWeight: pw.FontWeight.bold,
@@ -161,28 +198,31 @@ class ProblemGeneratorProvider extends ChangeNotifier {
                 ),
                 pw.SizedBox(height: 10),
                 pw.Text(
-                  problem.question,
+                  convertJapaneseForWeb(problem.question),
                   style: const pw.TextStyle(fontSize: 14),
                 ),
                 pw.SizedBox(height: 20),
                 if (problem.choices != null && problem.choices!.isNotEmpty) ...[
-                  pw.Text('選択肢:', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                  pw.Text(
+                    convertJapaneseForWeb('選択肢:'),
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                  ),
                   pw.SizedBox(height: 5),
                   ...problem.choices!.asMap().entries.map((entry) {
                     return pw.Padding(
                       padding: const pw.EdgeInsets.only(left: 20, top: 5),
-                      child: pw.Text('${entry.key + 1}. ${entry.value}'),
+                      child: pw.Text('${entry.key + 1}. ${convertJapaneseForWeb(entry.value)}'),
                     );
                   }).toList(),
                   pw.SizedBox(height: 20),
                 ],
                 pw.Text(
-                  '解答: ${problem.answer}',
+                  convertJapaneseForWeb('解答: ${problem.answer}'),
                   style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 10),
                 pw.Text(
-                  '解説: ${problem.explanation}',
+                  convertJapaneseForWeb('解説: ${problem.explanation}'),
                   style: const pw.TextStyle(fontSize: 12),
                 ),
                 pw.SizedBox(height: 20),
@@ -195,10 +235,13 @@ class ProblemGeneratorProvider extends ChangeNotifier {
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('出典情報', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                      pw.Text(
+                        convertJapaneseForWeb('出典情報'),
+                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      ),
                       pw.SizedBox(height: 5),
-                      pw.Text('ファイル: ${problem.sourceFile}'),
-                      pw.Text('ページ: ${problem.sourcePage}'),
+                      pw.Text(convertJapaneseForWeb('ファイル: ${problem.sourceFile}')),
+                      pw.Text(convertJapaneseForWeb('ページ: ${problem.sourcePage}')),
                       if (problem.sourceUri != null)
                         pw.Text('URI: ${problem.sourceUri}'),
                     ],
