@@ -41,15 +41,10 @@ class _GenerationScreenState extends State<GenerationScreen> {
           currentStep: _currentStep,
           onStepContinue: () async {
             if (_currentStep == 0) {
-              if (provider.uploadedPDF != null) {
-                setState(() {
-                  _currentStep = 1;
-                });
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('PDFをアップロードしてください')),
-                );
-              }
+              // PDFアップロードはオプションなので、常に次のステップに進む
+              setState(() {
+                _currentStep = 1;
+              });
             } else if (_currentStep == 1) {
               if (provider.params != null) {
                 await provider.generateProblems();
@@ -108,9 +103,7 @@ class _GenerationScreenState extends State<GenerationScreen> {
               children: [
                 if (_currentStep == 0)
                   ElevatedButton(
-                    onPressed: provider.uploadedPDF != null
-                        ? details.onStepContinue
-                        : null,
+                    onPressed: details.onStepContinue,
                     child: const Text('次へ'),
                   )
                 else

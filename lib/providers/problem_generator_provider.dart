@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -30,6 +31,24 @@ class ProblemGeneratorProvider extends ChangeNotifier {
 
   final ApiService _apiService = ApiService();
 
+  Future<Uint8List> _generateBlankPDF() async {
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        build: (pw.Context context) {
+          return pw.Center(
+            child: pw.Text(
+              '',
+              style: const pw.TextStyle(fontSize: 12),
+            ),
+          );
+        },
+      ),
+    );
+    return await pdf.save();
+  }
+
   Future<void> uploadPDF() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -60,8 +79,8 @@ class ProblemGeneratorProvider extends ChangeNotifier {
   }
 
   Future<void> generateProblems() async {
-    if (_uploadedPDF == null || _params == null) {
-      _errorMessage = 'PDFとパラメータを設定してください';
+    if (_params == null) {
+      _errorMessage = 'パラメータを設定してください';
       notifyListeners();
       return;
     }
@@ -75,10 +94,20 @@ class ProblemGeneratorProvider extends ChangeNotifier {
         await Future.delayed(const Duration(seconds: 2));
         _generatedProblems = ApiService.getMockProblems(_params!);
       } else {
-        _generatedProblems = await _apiService.generateProblems(
-          pdfBytes: _uploadedPDF!.bytes!,
-          params: _params!,
-        );
+        if (_uploadedPDF != null) {
+          // PDFがアップロードされている場合
+          _generatedProblems = await _apiService.generateProblems(
+            pdfBytes: _uploadedPDF!.bytes!,
+            params: _params!,
+          );
+        } else {
+          // PDFがない場合は白紙のPDFを送信
+          final blankPdfBytes = await _generateBlankPDF();
+          _generatedProblems = await _apiService.generateProblems(
+            pdfBytes: blankPdfBytes,
+            params: _params!,
+          );
+        }
       }
 
       await _generatePDF();
@@ -125,7 +154,7 @@ class ProblemGeneratorProvider extends ChangeNotifier {
           );
         }
       } else {
-        final pdfBytes = additionalPDF?.bytes ?? _uploadedPDF!.bytes!;
+        final pdfBytes = additionalPDF?.bytes ?? _uploadedPDF?.bytes ?? await _generateBlankPDF();
         newProblems = await _apiService.generateProblems(
           pdfBytes: pdfBytes,
           params: params,
@@ -175,12 +204,19 @@ class ProblemGeneratorProvider extends ChangeNotifier {
       return text;
     }
 
-    for (var i = 0; i < _generatedProblems.length; i++) {
-      final problem = _generatedProblems[i];
+    // 問題を複数ページに効率的に配置
+    const int problemsPerPage = 3; // 1ページに最大3問
+    final int totalPages = (_generatedProblems.length / problemsPerPage).ceil();
+
+    for (int pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+      final startIndex = pageIndex * problemsPerPage;
+      final endIndex = math.min(startIndex + problemsPerPage, _generatedProblems.length);
+      final problemsOnThisPage = _generatedProblems.sublist(startIndex, endIndex);
 
       pdf.addPage(
         pw.Page(
           pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
           theme: pw.ThemeData.withFont(
             base: font,
             bold: fontBold,
@@ -189,66 +225,230 @@ class ProblemGeneratorProvider extends ChangeNotifier {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text(
-                  convertJapaneseForWeb('問題 ${i + 1}'),
+                // ページヘッダー
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.blue50,
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+                    border: pw.Border.all(width: 1, color: PdfColors.blue200),
+                  ),
+                  child: pw.Text(
+                    convertJapaneseForWeb('問題集 - ${pageIndex + 1}ページ目'),
+                    style: pw.TextStyle(
+                      fontSize: 14,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.blue800,
+                    ),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                ),
+                pw.SizedBox(height: 20),
+
+                // このページの問題たち
+                pw.Expanded(
+                  child: pw.Column(
+                    children: problemsOnThisPage.asMap().entries.map((entry) {
+                      final localIndex = entry.key;
+                      final globalIndex = startIndex + localIndex;
+                      final problem = entry.value;
+                      final isLastOnPage = localIndex == problemsOnThisPage.length - 1;
+
+                      return pw.Container(
+                        margin: pw.EdgeInsets.only(bottom: isLastOnPage ? 0 : 15),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            // 問題番号と問題文をコンパクトに
+                            pw.Container(
+                              width: double.infinity,
+                              padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                              decoration: pw.BoxDecoration(
+                                color: PdfColors.grey100,
+                                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                                border: pw.Border.all(width: 0.5, color: PdfColors.grey300),
+                              ),
+                              child: pw.Text(
+                                convertJapaneseForWeb('問題 ${globalIndex + 1}'),
+                                style: pw.TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: pw.FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            pw.SizedBox(height: 8),
+
+                            // 問題文
+                            pw.Padding(
+                              padding: const pw.EdgeInsets.only(left: 8),
+                              child: pw.Text(
+                                convertJapaneseForWeb(problem.question),
+                                style: const pw.TextStyle(fontSize: 12, lineSpacing: 1.3),
+                              ),
+                            ),
+                            pw.SizedBox(height: 8),
+
+                            // 選択肢（ある場合）- コンパクト表示
+                            if (problem.choices != null && problem.choices!.isNotEmpty) ...[
+                              pw.Padding(
+                                padding: const pw.EdgeInsets.only(left: 8),
+                                child: pw.Wrap(
+                                  spacing: 15,
+                                  runSpacing: 3,
+                                  children: problem.choices!.asMap().entries.map((choiceEntry) {
+                                    return pw.Text(
+                                      '${choiceEntry.key + 1}. ${convertJapaneseForWeb(choiceEntry.value)}',
+                                      style: const pw.TextStyle(fontSize: 11),
+                                    );
+                                  }).toList(),
+                                ),
+                              ),
+                              pw.SizedBox(height: 8),
+                            ],
+
+                            // コンパクトな解答欄
+                            pw.Container(
+                              width: double.infinity,
+                              height: 30,
+                              margin: const pw.EdgeInsets.only(left: 8),
+                              decoration: pw.BoxDecoration(
+                                border: pw.Border.all(width: 1, color: PdfColors.grey400),
+                                borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                              ),
+                              child: pw.Padding(
+                                padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                child: pw.Align(
+                                  alignment: pw.Alignment.centerLeft,
+                                  child: pw.Text(
+                                    convertJapaneseForWeb('解答: '),
+                                    style: pw.TextStyle(
+                                      fontSize: 10,
+                                      color: PdfColors.grey600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            if (!isLastOnPage) pw.SizedBox(height: 15),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+
+                pw.SizedBox(height: 15),
+
+                // ページフッター（ページ番号のみ）
+                pw.Container(
+                  width: double.infinity,
+                  padding: const pw.EdgeInsets.all(8),
+                  decoration: pw.BoxDecoration(
+                    color: PdfColors.grey50,
+                    border: pw.Border.all(width: 0.5, color: PdfColors.grey300),
+                    borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+                  ),
+                  child: pw.Text(
+                    convertJapaneseForWeb('ページ ${pageIndex + 1} / $totalPages'),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+                    textAlign: pw.TextAlign.center,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+    }
+
+    // 解答・解説ページを別途追加
+    if (_generatedProblems.isNotEmpty) {
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(30),
+          theme: pw.ThemeData.withFont(
+            base: font,
+            bold: fontBold,
+          ),
+          build: (pw.Context context) {
+            return [
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(vertical: 12, horizontal: 20),
+                decoration: pw.BoxDecoration(
+                  color: PdfColors.blue100,
+                  borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+                ),
+                child: pw.Text(
+                  convertJapaneseForWeb('解答・解説'),
                   style: pw.TextStyle(
                     fontSize: 18,
                     fontWeight: pw.FontWeight.bold,
                   ),
+                  textAlign: pw.TextAlign.center,
                 ),
-                pw.SizedBox(height: 10),
-                pw.Text(
-                  convertJapaneseForWeb(problem.question),
-                  style: const pw.TextStyle(fontSize: 14),
-                ),
-                pw.SizedBox(height: 20),
-                if (problem.choices != null && problem.choices!.isNotEmpty) ...[
-                  pw.Text(
-                    convertJapaneseForWeb('選択肢:'),
-                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                  ),
-                  pw.SizedBox(height: 5),
-                  ...problem.choices!.asMap().entries.map((entry) {
-                    return pw.Padding(
-                      padding: const pw.EdgeInsets.only(left: 20, top: 5),
-                      child: pw.Text('${entry.key + 1}. ${convertJapaneseForWeb(entry.value)}'),
-                    );
-                  }).toList(),
-                  pw.SizedBox(height: 20),
-                ],
-                pw.Text(
-                  convertJapaneseForWeb('解答: ${problem.answer}'),
-                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-                ),
-                pw.SizedBox(height: 10),
-                pw.Text(
-                  convertJapaneseForWeb('解説: ${problem.explanation}'),
-                  style: const pw.TextStyle(fontSize: 12),
-                ),
-                pw.SizedBox(height: 20),
+              ),
+              pw.SizedBox(height: 20),
+
+              // 各問題の解答・解説をコンパクトに
+              for (var i = 0; i < _generatedProblems.length; i++) ...[
                 pw.Container(
-                  padding: const pw.EdgeInsets.all(10),
+                  width: double.infinity,
+                  margin: const pw.EdgeInsets.only(bottom: 15),
                   decoration: pw.BoxDecoration(
-                    border: pw.Border.all(width: 1),
+                    border: pw.Border.all(width: 1, color: PdfColors.grey300),
                     borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
                   ),
                   child: pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text(
-                        convertJapaneseForWeb('出典情報'),
-                        style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                      pw.Container(
+                        width: double.infinity,
+                        padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                        decoration: const pw.BoxDecoration(
+                          color: PdfColors.grey100,
+                          borderRadius: pw.BorderRadius.only(
+                            topLeft: pw.Radius.circular(4),
+                            topRight: pw.Radius.circular(4),
+                          ),
+                        ),
+                        child: pw.Text(
+                          convertJapaneseForWeb('問題 ${i + 1}'),
+                          style: pw.TextStyle(
+                            fontSize: 12,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
                       ),
-                      pw.SizedBox(height: 5),
-                      pw.Text(convertJapaneseForWeb('ファイル: ${problem.sourceFile}')),
-                      pw.Text(convertJapaneseForWeb('ページ: ${problem.sourcePage}')),
-                      if (problem.sourceUri != null)
-                        pw.Text('URI: ${problem.sourceUri}'),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(12),
+                        child: pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              convertJapaneseForWeb('正解: ${_generatedProblems[i].answer}'),
+                              style: pw.TextStyle(
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 11,
+                                color: PdfColors.red600,
+                              ),
+                            ),
+                            pw.SizedBox(height: 5),
+                            pw.Text(
+                              convertJapaneseForWeb('解説: ${_generatedProblems[i].explanation}'),
+                              style: const pw.TextStyle(fontSize: 10, lineSpacing: 1.3),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ],
-            );
+            ];
           },
         ),
       );
