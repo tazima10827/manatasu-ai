@@ -14,8 +14,14 @@ from google.cloud import firestore
 import vertexai
 from vertexai.generative_models import GenerativeModel, Part
 from dotenv import load_dotenv
+from services.guidelines_service import GuidelinesService
+from services.mvp_rag_service import MVPRAGService
+import base64
 
 load_dotenv()
+
+# MVP版RAGサービスを有効にするフラグ
+USE_MVP_RAG = os.getenv("USE_MVP_RAG", "true").lower() == "true"
 
 app = FastAPI(title="manatasuAI API", version="1.0.0")
 
@@ -23,6 +29,11 @@ security = HTTPBearer()
 
 origins = [
     "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:3004",
+    "http://localhost:3005",
     "http://localhost:8080",
     "http://localhost:5000",
     "https://manatasu-ai.web.app",
@@ -35,6 +46,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "")
@@ -69,6 +81,11 @@ class GeneratedProblem(BaseModel):
     sourceUri: Optional[str] = None
     generatedAt: datetime
 
+class Base64ProblemRequest(BaseModel):
+    pdfBase64: str
+    filename: str
+    params: ProblemGenerationParams
+
 def verify_api_key(credentials: HTTPAuthorizationCredentials = Security(security)):
     if credentials.credentials != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
@@ -86,25 +103,99 @@ async def generate_problems(
 
         pdf_content = await pdf.read()
 
-        pdf_reader = PyPDF2.PdfReader(pdf_content)
+        from io import BytesIO
+        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
         text_content = ""
         for page_num, page in enumerate(pdf_reader.pages):
             text_content += f"\n--- Page {page_num + 1} ---\n"
             text_content += page.extract_text()
 
-        model = GenerativeModel("gemini-1.5-flash")
+        print(f"Extracted PDF content length: {len(text_content)}")
+        print(f"PDF content preview: {text_content[:200]}...")
 
-        prompt = f"""
-        以下のPDF内容から、{problem_params.subject}の{problem_params.grade}向けの問題を{problem_params.problemCount}問生成してください。
+        # MVP版RAGを使用するかチェック
+        if USE_MVP_RAG:
+            print("Using MVP RAG Service for cost optimization")
+            mvp_rag = MVPRAGService(project_id=PROJECT_ID)
 
-        条件:
+            try:
+                # MVP版RAGで生成
+                result = mvp_rag.generate_with_rag(
+                    subject=problem_params.subject,
+                    grade=problem_params.grade,
+                    difficulty=problem_params.difficulty,
+                    problem_count=problem_params.problemCount,
+                    problem_type=problem_params.problemType,
+                    pdf_content=text_content,
+                    specific_topic=problem_params.specificTopic
+                )
+
+                # 結果から問題を抽出
+                generated_data = result
+            except Exception as mvp_error:
+                print(f"MVP RAG error: {mvp_error}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"MVP RAG error: {str(mvp_error)}")
+
+        else:
+            model = GenerativeModel("gemini-1.5-flash")
+
+            # 指導要領サービスを初期化
+            guidelines_service = GuidelinesService(project_id=PROJECT_ID)
+
+            # 関連する指導要領を取得
+            guidelines = []
+            if guidelines_service.db:
+                guidelines = guidelines_service.get_relevant_guidelines(
+                    subject=problem_params.subject,
+                    grade=problem_params.grade,
+                    topic=problem_params.specificTopic
+                )
+
+            # 指導要領を含むプロンプトを生成
+            prompt = f"""
+            以下の情報を参考に、{problem_params.subject}の{problem_params.grade}向けの問題を{problem_params.problemCount}問生成してください。
+            """
+
+            # 指導要領がある場合は追加
+            if guidelines:
+                prompt += f"""
+
+        【文部科学省学習指導要領】
+        """
+                for guideline in guidelines[:2]:  # 最大2つまで使用
+                    prompt += f"""
+        ■ {guideline.get('subject')} - {guideline.get('grade')}
+        学習目標: {', '.join(guideline.get('learning_goals', [])[:3]) if guideline.get('learning_goals') else ''}
+        重要トピック: {', '.join(guideline.get('topics', [])) if guideline.get('topics') else ''}
+        キーワード: {', '.join(guideline.get('keywords', [])) if guideline.get('keywords') else ''}
+        """
+
+                    # 学年別の詳細があれば追加
+                    if 'grade_specific' in guideline and problem_params.grade in str(guideline.get('grade_specific', {})):
+                        for grade_key, topics in guideline.get('grade_specific', {}).items():
+                            if grade_key in problem_params.grade:
+                                prompt += f"""
+        {grade_key}の学習内容: {', '.join(topics)}
+        """
+
+            prompt += f"""
+
+        【生成条件】
         - 難易度: {problem_params.difficulty}
         - 問題形式: {problem_params.problemType}
         {'- トピック: ' + problem_params.specificTopic if problem_params.specificTopic else ''}
         {'- 追加指示: ' + problem_params.additionalInstructions if problem_params.additionalInstructions else ''}
 
-        PDF内容:
+        【参考資料（アップロードされたPDF内容）】
         {text_content[:10000]}
+
+        【要求事項】
+        - 学習指導要領の目標と内容に準拠した問題を作成
+        - 児童・生徒の発達段階に適した難易度と表現を使用
+        - 思考力・判断力・表現力を育成する問題を含める
+        - 基礎的・基本的な知識・技能の定着を確認できる問題
 
         以下の形式でJSONとして出力してください:
         {{
@@ -112,7 +203,7 @@ async def generate_problems(
                 {{
                     "question": "問題文",
                     "answer": "解答",
-                    "explanation": "解説",
+                    "explanation": "解説（学習指導要領の観点も含める）",
                     "choices": ["選択肢1", "選択肢2", ...] (選択問題の場合のみ),
                     "sourcePage": "参照ページ番号"
                 }}
@@ -120,42 +211,292 @@ async def generate_problems(
         }}
         """
 
-        response = model.generate_content(prompt)
+            response = model.generate_content(prompt)
 
-        try:
-            response_text = response.text
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
+            try:
+                response_text = response.text
+                print(f"Raw AI response: {response_text[:500]}...")  # Log for debugging
 
-            generated_data = json.loads(response_text.strip())
-        except json.JSONDecodeError:
-            generated_data = {
-                "problems": [
-                    {
-                        "question": f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}",
-                        "answer": "解答例",
-                        "explanation": "解説文",
-                        "choices": ["選択肢A", "選択肢B", "選択肢C", "選択肢D"] if problem_params.problemType == "選択問題" else None,
-                        "sourcePage": f"p.{i+1}"
-                    }
-                    for i in range(problem_params.problemCount)
-                ]
-            }
+                # Clean up response text
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+
+                # Try to extract just the JSON part if there's extra text
+                response_text = response_text.strip()
+                if "{" in response_text:
+                    start = response_text.find("{")
+                    # Find the matching closing brace
+                    brace_count = 0
+                    end = start
+                    for i, char in enumerate(response_text[start:], start):
+                        if char == "{":
+                            brace_count += 1
+                        elif char == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end = i + 1
+                                break
+                    response_text = response_text[start:end]
+
+                generated_data = json.loads(response_text)
+                print(f"Parsed JSON: {generated_data}")  # Log for debugging
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                print(f"Failed to parse: {response_text}")
+                generated_data = {
+                    "problems": [
+                        {
+                            "question": f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}",
+                            "answer": "解答例",
+                            "explanation": "解説文",
+                            "choices": ["選択肢A", "選択肢B", "選択肢C", "選択肢D"] if problem_params.problemType == "選択問題" else None,
+                            "sourcePage": f"p.{i+1}"
+                        }
+                        for i in range(problem_params.problemCount)
+                    ]
+                }
+
 
         problems = []
         for i, problem_data in enumerate(generated_data.get("problems", [])):
+            question = problem_data.get("question", "").strip()
+            answer = problem_data.get("answer", "").strip()
+            explanation = problem_data.get("explanation", "").strip()
+
+            # Use fallback if empty
+            if not question:
+                question = f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}"
+            if not answer:
+                answer = "解答例"
+            if not explanation:
+                explanation = "解説文"
+
             problem = GeneratedProblem(
                 id=str(uuid.uuid4()),
-                question=problem_data.get("question", ""),
-                answer=problem_data.get("answer", ""),
-                explanation=problem_data.get("explanation", ""),
+                question=question,
+                answer=answer,
+                explanation=explanation,
                 choices=problem_data.get("choices"),
                 difficulty=problem_params.difficulty,
                 subject=problem_params.subject,
                 grade=problem_params.grade,
                 sourceFile=pdf.filename,
+                sourcePage=problem_data.get("sourcePage", f"p.{i+1}"),
+                sourceUri=None,
+                generatedAt=datetime.now()
+            )
+            problems.append(problem)
+
+        if db:
+            batch = db.batch()
+            for problem in problems:
+                doc_ref = db.collection("generated_problems").document(problem.id)
+                batch.set(doc_ref, problem.dict())
+            batch.commit()
+
+        return {"problems": [p.dict() for p in problems]}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/generate-problems-base64")
+async def generate_problems_base64(
+    request: Base64ProblemRequest,
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Base64エンコードされたPDFを使用した問題生成（Flutter Web対応）
+    """
+    try:
+        # Base64をデコードしてPDFバイトに変換
+        try:
+            pdf_content = base64.b64decode(request.pdfBase64)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid base64 PDF data: {str(e)}")
+
+        problem_params = request.params
+
+        from io import BytesIO
+        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+        text_content = ""
+        for page_num, page in enumerate(pdf_reader.pages):
+            text_content += f"\n--- Page {page_num + 1} ---\n"
+            text_content += page.extract_text()
+
+        print(f"Base64 PDF content length: {len(text_content)}")
+        print(f"Base64 PDF content preview: {text_content[:200]}...")
+
+        # MVP版RAGを使用するかチェック
+        if USE_MVP_RAG:
+            print("Using MVP RAG Service for base64 request")
+            mvp_rag = MVPRAGService(project_id=PROJECT_ID)
+
+            try:
+                # MVP版RAGで生成
+                result = mvp_rag.generate_with_rag(
+                    subject=problem_params.subject,
+                    grade=problem_params.grade,
+                    difficulty=problem_params.difficulty,
+                    problem_count=problem_params.problemCount,
+                    problem_type=problem_params.problemType,
+                    pdf_content=text_content,
+                    specific_topic=problem_params.specificTopic
+                )
+
+                # 結果から問題を抽出
+                generated_data = result
+            except Exception as mvp_error:
+                print(f"MVP RAG error: {mvp_error}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"MVP RAG error: {str(mvp_error)}")
+
+        else:
+            model = GenerativeModel("gemini-1.5-flash")
+
+            # 指導要領サービスを初期化
+            guidelines_service = GuidelinesService(project_id=PROJECT_ID)
+
+            # 関連する指導要領を取得
+            guidelines = []
+            if guidelines_service.db:
+                guidelines = guidelines_service.get_relevant_guidelines(
+                    subject=problem_params.subject,
+                    grade=problem_params.grade,
+                    topic=problem_params.specificTopic
+                )
+
+            # 指導要領を含むプロンプトを生成
+            prompt = f"""
+            以下の情報を参考に、{problem_params.subject}の{problem_params.grade}向けの問題を{problem_params.problemCount}問生成してください。
+            """
+
+            # 指導要領がある場合は追加
+            if guidelines:
+                prompt += f"""
+
+        【文部科学省学習指導要領】
+        """
+                for guideline in guidelines[:2]:  # 最大2つまで使用
+                    prompt += f"""
+        ■ {guideline.get('subject')} - {guideline.get('grade')}
+        学習目標: {', '.join(guideline.get('learning_goals', [])[:3]) if guideline.get('learning_goals') else ''}
+        重要トピック: {', '.join(guideline.get('topics', [])) if guideline.get('topics') else ''}
+        キーワード: {', '.join(guideline.get('keywords', [])) if guideline.get('keywords') else ''}
+        """
+
+                    # 学年別の詳細があれば追加
+                    if 'grade_specific' in guideline and problem_params.grade in str(guideline.get('grade_specific', {})):
+                        for grade_key, topics in guideline.get('grade_specific', {}).items():
+                            if grade_key in problem_params.grade:
+                                prompt += f"""
+        {grade_key}の学習内容: {', '.join(topics)}
+        """
+
+            prompt += f"""
+
+        【生成条件】
+        - 難易度: {problem_params.difficulty}
+        - 問題形式: {problem_params.problemType}
+        {'- トピック: ' + problem_params.specificTopic if problem_params.specificTopic else ''}
+        {'- 追加指示: ' + problem_params.additionalInstructions if problem_params.additionalInstructions else ''}
+
+        【参考資料（アップロードされたPDF内容）】
+        {text_content[:10000]}
+
+        【要求事項】
+        - 学習指導要領の目標と内容に準拠した問題を作成
+        - 児童・生徒の発達段階に適した難易度と表現を使用
+        - 思考力・判断力・表現力を育成する問題を含める
+        - 基礎的・基本的な知識・技能の定着を確認できる問題
+
+        以下の形式でJSONとして出力してください:
+        {{
+            "problems": [
+                {{
+                    "question": "問題文",
+                    "answer": "解答",
+                    "explanation": "解説（学習指導要領の観点も含める）",
+                    "choices": ["選択肢1", "選択肢2", ...] (選択問題の場合のみ),
+                    "sourcePage": "参照ページ番号"
+                }}
+            ]
+        }}
+        """
+
+            response = model.generate_content(prompt)
+
+            try:
+                response_text = response.text
+                print(f"Raw AI response: {response_text[:500]}...")  # Log for debugging
+
+                # Clean up response text
+                if response_text.startswith("```json"):
+                    response_text = response_text[7:]
+                if response_text.endswith("```"):
+                    response_text = response_text[:-3]
+
+                # Try to extract just the JSON part if there's extra text
+                response_text = response_text.strip()
+                if "{" in response_text:
+                    start = response_text.find("{")
+                    # Find the matching closing brace
+                    brace_count = 0
+                    end = start
+                    for i, char in enumerate(response_text[start:], start):
+                        if char == "{":
+                            brace_count += 1
+                        elif char == "}":
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end = i + 1
+                                break
+                    response_text = response_text[start:end]
+
+                generated_data = json.loads(response_text)
+                print(f"Parsed JSON: {generated_data}")  # Log for debugging
+            except json.JSONDecodeError as e:
+                print(f"JSON decode error: {e}")
+                print(f"Failed to parse: {response_text}")
+                generated_data = {
+                    "problems": [
+                        {
+                            "question": f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}",
+                            "answer": "解答例",
+                            "explanation": "解説文",
+                            "choices": ["選択肢A", "選択肢B", "選択肢C", "選択肢D"] if problem_params.problemType == "選択問題" else None,
+                            "sourcePage": f"p.{i+1}"
+                        }
+                        for i in range(problem_params.problemCount)
+                    ]
+                }
+
+        problems = []
+        for i, problem_data in enumerate(generated_data.get("problems", [])):
+            question = problem_data.get("question", "").strip()
+            answer = problem_data.get("answer", "").strip()
+            explanation = problem_data.get("explanation", "").strip()
+
+            # Use fallback if empty
+            if not question:
+                question = f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}"
+            if not answer:
+                answer = "解答例"
+            if not explanation:
+                explanation = "解説文"
+
+            problem = GeneratedProblem(
+                id=str(uuid.uuid4()),
+                question=question,
+                answer=answer,
+                explanation=explanation,
+                choices=problem_data.get("choices"),
+                difficulty=problem_params.difficulty,
+                subject=problem_params.subject,
+                grade=problem_params.grade,
+                sourceFile=request.filename,
                 sourcePage=problem_data.get("sourcePage", f"p.{i+1}"),
                 sourceUri=None,
                 generatedAt=datetime.now()
@@ -181,7 +522,7 @@ async def extract_pdf_text(
 ):
     try:
         pdf_content = await pdf.read()
-        pdf_reader = PyPDF2.PdfReader(pdf_content)
+        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
 
         pages = []
         for page_num, page in enumerate(pdf_reader.pages):
@@ -203,6 +544,19 @@ async def extract_pdf_text(
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+@app.get("/api/usage-stats")
+async def get_usage_stats(api_key: str = Depends(verify_api_key)):
+    """
+    MVP版RAGの使用統計を取得
+    """
+    try:
+        mvp_rag = MVPRAGService(project_id=PROJECT_ID)
+        stats = mvp_rag.get_monthly_usage()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)

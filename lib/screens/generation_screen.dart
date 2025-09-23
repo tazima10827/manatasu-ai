@@ -53,9 +53,33 @@ class _GenerationScreenState extends State<GenerationScreen> {
             } else if (_currentStep == 1) {
               if (provider.params != null) {
                 await provider.generateProblems();
-                if (!provider.isLoading && provider.errorMessage == null) {
-                  if (mounted) {
-                    context.go('/result');
+                if (!provider.isLoading) {
+                  if (provider.errorMessage != null) {
+                    // エラーアラートを表示
+                    if (mounted) {
+                      showDialog(
+                        context: context,
+                        builder: (BuildContext context) {
+                          return AlertDialog(
+                            title: const Text('エラー'),
+                            content: Text(provider.errorMessage!),
+                            actions: [
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                },
+                                child: const Text('OK'),
+                              ),
+                            ],
+                          );
+                        },
+                      );
+                    }
+                  } else {
+                    // 成功時は結果画面に遷移
+                    if (mounted) {
+                      context.go('/result');
+                    }
                   }
                 }
               } else {

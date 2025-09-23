@@ -1,5 +1,5 @@
 class Config {
-  static const bool useMockData = true;
+  static const bool useMockData = false;
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
