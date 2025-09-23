@@ -222,14 +222,36 @@ class _AddMoreProblemsDialogState extends State<AddMoreProblemsDialog> {
                               params: _params!,
                             );
 
-                            if (provider.errorMessage == null && context.mounted) {
-                              Navigator.of(context).pop();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('${_params!.problemCount}問の問題を追加しました'),
-                                  backgroundColor: Colors.green,
-                                ),
-                              );
+                            if (context.mounted) {
+                              if (provider.errorMessage != null) {
+                                // エラーアラートを表示
+                                showDialog(
+                                  context: context,
+                                  builder: (BuildContext context) {
+                                    return AlertDialog(
+                                      title: const Text('エラー'),
+                                      content: Text(provider.errorMessage!),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.of(context).pop();
+                                          },
+                                          child: const Text('OK'),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                );
+                              } else {
+                                // 成功時はダイアログを閉じて成功メッセージを表示
+                                Navigator.of(context).pop();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('${_params!.problemCount}問の問題を追加しました'),
+                                    backgroundColor: Colors.green,
+                                  ),
+                                );
+                              }
                             }
                           },
                     child: provider.isLoading

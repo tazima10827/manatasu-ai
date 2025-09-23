@@ -86,11 +86,15 @@ async def generate_problems(
 
         pdf_content = await pdf.read()
 
-        pdf_reader = PyPDF2.PdfReader(pdf_content)
+        from io import BytesIO
+        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
         text_content = ""
         for page_num, page in enumerate(pdf_reader.pages):
             text_content += f"\n--- Page {page_num + 1} ---\n"
             text_content += page.extract_text()
+
+        print(f"Extracted PDF content length: {len(text_content)}")
+        print(f"PDF content preview: {text_content[:200]}...")
 
         model = GenerativeModel("gemini-1.5-flash")
 
@@ -124,13 +128,36 @@ async def generate_problems(
 
         try:
             response_text = response.text
+            print(f"Raw AI response: {response_text[:500]}...")  # Log for debugging
+
+            # Clean up response text
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
             if response_text.endswith("```"):
                 response_text = response_text[:-3]
 
-            generated_data = json.loads(response_text.strip())
-        except json.JSONDecodeError:
+            # Try to extract just the JSON part if there's extra text
+            response_text = response_text.strip()
+            if "{" in response_text:
+                start = response_text.find("{")
+                # Find the matching closing brace
+                brace_count = 0
+                end = start
+                for i, char in enumerate(response_text[start:], start):
+                    if char == "{":
+                        brace_count += 1
+                    elif char == "}":
+                        brace_count -= 1
+                        if brace_count == 0:
+                            end = i + 1
+                            break
+                response_text = response_text[start:end]
+
+            generated_data = json.loads(response_text)
+            print(f"Parsed JSON: {generated_data}")  # Log for debugging
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            print(f"Failed to parse: {response_text}")
             generated_data = {
                 "problems": [
                     {
@@ -146,11 +173,23 @@ async def generate_problems(
 
         problems = []
         for i, problem_data in enumerate(generated_data.get("problems", [])):
+            question = problem_data.get("question", "").strip()
+            answer = problem_data.get("answer", "").strip()
+            explanation = problem_data.get("explanation", "").strip()
+
+            # Use fallback if empty
+            if not question:
+                question = f"問題{i+1}: {problem_params.subject}に関する{problem_params.problemType}"
+            if not answer:
+                answer = "解答例"
+            if not explanation:
+                explanation = "解説文"
+
             problem = GeneratedProblem(
                 id=str(uuid.uuid4()),
-                question=problem_data.get("question", ""),
-                answer=problem_data.get("answer", ""),
-                explanation=problem_data.get("explanation", ""),
+                question=question,
+                answer=answer,
+                explanation=explanation,
                 choices=problem_data.get("choices"),
                 difficulty=problem_params.difficulty,
                 subject=problem_params.subject,
@@ -181,7 +220,7 @@ async def extract_pdf_text(
 ):
     try:
         pdf_content = await pdf.read()
-        pdf_reader = PyPDF2.PdfReader(pdf_content)
+        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
 
         pages = []
         for page_num, page in enumerate(pdf_reader.pages):

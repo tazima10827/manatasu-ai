@@ -1,9 +1,9 @@
 class Config {
-  static const bool useMockData = true;
+  static const bool useMockData = false;
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8080/api',
+    defaultValue: 'https://manatasu-ai-backend-676pzc6mla-an.a.run.app/api',
   );
 
   static const String apiKey = String.fromEnvironment(

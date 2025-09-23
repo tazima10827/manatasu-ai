@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import '../models/problem_generation_params.dart';
 import '../models/generated_problem.dart';
@@ -29,7 +30,7 @@ class ApiService {
       request.fields['params'] = jsonEncode(params.toJson());
 
       final headers = {
-        'X-API-Key': Config.apiKey,
+        'Authorization': 'Bearer ${Config.apiKey}',
       };
 
       request.headers.addAll(headers);
@@ -38,12 +39,21 @@ class ApiService {
       final responseBody = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
-        final jsonResponse = jsonDecode(responseBody) as Map<String, dynamic>;
-        final problemsJson = jsonResponse['problems'] as List;
+        print('Flutter: API Response received: ${responseBody.substring(0, math.min(500, responseBody.length))}...');
 
-        return problemsJson
+        final jsonResponse = jsonDecode(responseBody) as Map<String, dynamic>;
+        print('Flutter: Parsed JSON response: $jsonResponse');
+
+        final problemsJson = jsonResponse['problems'] as List;
+        print('Flutter: Problems count: ${problemsJson.length}');
+
+        final problems = problemsJson
             .map((json) => GeneratedProblem.fromJson(json))
             .toList();
+
+        print('Flutter: Generated problems: ${problems.map((p) => p.question).toList()}');
+
+        return problems;
       } else {
         throw Exception('API Error: ${response.statusCode} - $responseBody');
       }
@@ -68,7 +78,7 @@ class ApiService {
       );
 
       final headers = {
-        'X-API-Key': Config.apiKey,
+        'Authorization': 'Bearer ${Config.apiKey}',
       };
 
       request.headers.addAll(headers);
