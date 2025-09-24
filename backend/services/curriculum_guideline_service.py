@@ -34,52 +34,174 @@ class CurriculumGuidelineService:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
+    def _calculate_japanese_score(self, text: str) -> float:
+        """
+        テキストの日本語品質スコアを計算（中国語との区別を含む）
+
+        Args:
+            text: 評価するテキスト
+
+        Returns:
+            float: 日本語品質スコア (0.0-1.0)
+        """
+        if not text or len(text) < 3:
+            return 0.0
+
+        hiragana_count = 0
+        katakana_count = 0
+        kanji_count = 0
+        japanese_specific_count = 0
+        chinese_specific_count = 0
+        total_chars = 0
+
+        # 日本語特有の文字パターンをチェック
+        japanese_particles = ['は', 'が', 'を', 'に', 'で', 'と', 'の', 'か', 'も', 'や']
+        japanese_endings = ['です', 'である', 'します', 'ます', 'った', 'って', 'だ', 'である']
+
+        # 中国語特有のパターン（簡体字、繁体字）
+        chinese_chars = ['的', '了', '在', '是', '我', '你', '他', '她', '这', '那', '有', '个', '与', '國', '們', '為']
+
+        for char in text:
+            if char.strip() and not char.isspace():
+                total_chars += 1
+                code_point = ord(char)
+
+                # ひらがな (U+3040-U+309F)
+                if 0x3040 <= code_point <= 0x309F:
+                    hiragana_count += 1
+                    japanese_specific_count += 3  # ひらがなは日本語特有なので高スコア
+                # カタカナ (U+30A0-U+30FF)
+                elif 0x30A0 <= code_point <= 0x30FF:
+                    katakana_count += 1
+                    japanese_specific_count += 2  # カタカナも日本語特有
+                # CJK統合漢字 (U+4E00-U+9FFF)
+                elif 0x4E00 <= code_point <= 0x9FFF:
+                    kanji_count += 1
+                    # 中国語特有の漢字かチェック
+                    if char in chinese_chars:
+                        chinese_specific_count += 2
+                    else:
+                        japanese_specific_count += 1  # 一般的な漢字
+
+        if total_chars == 0:
+            return 0.0
+
+        # 日本語助詞・語尾パターンのチェック
+        particle_bonus = 0
+        for particle in japanese_particles:
+            if particle in text:
+                particle_bonus += 0.1
+
+        ending_bonus = 0
+        for ending in japanese_endings:
+            if ending in text:
+                ending_bonus += 0.1
+
+        # スコア計算
+        hiragana_ratio = hiragana_count / total_chars
+        katakana_ratio = katakana_count / total_chars
+        japanese_ratio = japanese_specific_count / total_chars
+        chinese_penalty = chinese_specific_count / total_chars
+
+        # 日本語らしさのスコア
+        japanese_score = (
+            hiragana_ratio * 0.4 +  # ひらがなは日本語の証拠
+            katakana_ratio * 0.2 +  # カタカナも重要
+            japanese_ratio * 0.3 +  # 日本語特有文字
+            particle_bonus * 0.05 + # 助詞ボーナス
+            ending_bonus * 0.05     # 語尾ボーナス
+        )
+
+        # 中国語ペナルティを適用
+        final_score = max(0.0, japanese_score - chinese_penalty * 0.3)
+
+        return min(final_score, 1.0)
+
     def _fix_encoding_issues(self, text: str) -> str:
-        """PDFから抽出されたテキストのエンコーディング問題を修正"""
+        """
+        PDFから抽出されたテキストのエンコーディング問題を修正
+        Args:
+            text: 抽出されたテキスト
+        Returns:
+            str: エンコーディング修正されたテキスト
+        """
         if not text:
             return text
 
+        # 複数のエンコーディング修正を試行
+        best_result = text
+        best_score = 0
+
         try:
-            # Latin-1として誤解釈されたUTF-8を修正
-            if any(ord(c) > 127 for c in text):
+            # 方法1: Latin-1として誤解釈されたUTF-8を修正
+            if any(ord(c) > 127 for c in text):  # 非ASCII文字が含まれている場合
                 try:
+                    # Latin-1でエンコードしてUTF-8でデコード
                     fixed_text = text.encode('latin-1').decode('utf-8', errors='ignore')
-                    if self._is_readable_japanese(fixed_text):
-                        return fixed_text
+                    score = self._calculate_japanese_score(fixed_text)
+                    if score > best_score:
+                        best_result = fixed_text
+                        best_score = score
                 except (UnicodeError, UnicodeDecodeError):
                     pass
 
-            # CP1252として誤解釈されたUTF-8を修正
+            # 方法2: CP1252として誤解釈されたUTF-8を修正
             try:
                 fixed_text = text.encode('cp1252').decode('utf-8', errors='ignore')
-                if self._is_readable_japanese(fixed_text):
-                    return fixed_text
+                score = self._calculate_japanese_score(fixed_text)
+                if score > best_score:
+                    best_result = fixed_text
+                    best_score = score
             except (UnicodeError, UnicodeDecodeError):
                 pass
+
+            # 方法3: 日本語特有のエンコーディングを試行（優先順位付き）
+            encodings_to_try = [
+                ('shift_jis', 'Shift_JIS'),
+                ('euc-jp', 'EUC-JP'),
+                ('iso-2022-jp', 'ISO-2022-JP'),
+                ('utf-8', 'UTF-8'),
+                ('utf-16', 'UTF-16')
+            ]
+
+            for encoding, name in encodings_to_try:
+                try:
+                    if isinstance(text, str):
+                        # 文字列をバイトに変換してからデコード
+                        text_bytes = text.encode('latin-1', errors='ignore')
+                        fixed_text = text_bytes.decode(encoding, errors='ignore')
+                        score = self._calculate_japanese_score(fixed_text)
+                        if score > best_score:
+                            best_result = fixed_text
+                            best_score = score
+                except (UnicodeError, UnicodeDecodeError):
+                    continue
 
         except Exception as e:
             self.logger.warning(f"Encoding fix failed: {e}")
 
-        return text
+        # 最良の結果を返す（スコアが0.1以上の場合のみ）
+        if best_score >= 0.1:
+            return best_result
+        else:
+            return text
 
     def _is_readable_japanese(self, text: str) -> bool:
-        """テキストが読み取り可能な日本語かどうかを判定"""
+        """
+        テキストが読み取り可能な日本語かどうかを判定
+
+        Args:
+            text: 判定するテキスト
+
+        Returns:
+            bool: 読み取り可能な日本語の場合True
+        """
         if not text or len(text) < 3:
             return False
 
-        japanese_chars = 0
-        total_chars = 0
-
-        for char in text:
-            if char.isalpha() or ord(char) > 127:
-                total_chars += 1
-                # ひらがな、カタカナ、漢字のチェック
-                if (0x3040 <= ord(char) <= 0x309F or  # ひらがな
-                    0x30A0 <= ord(char) <= 0x30FF or  # カタカナ
-                    0x4E00 <= ord(char) <= 0x9FFF):   # CJK統合漢字
-                    japanese_chars += 1
-
-        return total_chars > 0 and (japanese_chars / total_chars) >= 0.3
+        # 日本語品質スコアを使用
+        score = self._calculate_japanese_score(text)
+        return score >= 0.3
 
     def download_pdf_from_storage(self, blob_path: str) -> Optional[bytes]:
         """Cloud StorageからPDFファイルをダウンロード"""
