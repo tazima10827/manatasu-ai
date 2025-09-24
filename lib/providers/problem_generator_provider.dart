@@ -21,6 +21,7 @@ class ProblemGeneratorProvider extends ChangeNotifier {
   List<GeneratedProblem> _generatedProblems = [];
   String? _errorMessage;
   Uint8List? _generatedPdfBytes;
+  String? _extractedText;
 
   bool get isLoading => _isLoading;
   PlatformFile? get uploadedPDF => _uploadedPDF;
@@ -28,6 +29,7 @@ class ProblemGeneratorProvider extends ChangeNotifier {
   List<GeneratedProblem> get generatedProblems => _generatedProblems;
   String? get errorMessage => _errorMessage;
   Uint8List? get generatedPdfBytes => _generatedPdfBytes;
+  String? get extractedText => _extractedText;
 
   final ApiService _apiService = ApiService();
 
@@ -96,17 +98,21 @@ class ProblemGeneratorProvider extends ChangeNotifier {
       } else {
         if (_uploadedPDF != null) {
           // PDFがアップロードされている場合
-          _generatedProblems = await _apiService.generateProblems(
+          final result = await _apiService.generateProblems(
             pdfBytes: _uploadedPDF!.bytes!,
             params: _params!,
           );
+          _generatedProblems = result.problems;
+          _extractedText = result.extractedText;
         } else {
           // PDFがない場合は白紙のPDFを送信
           final blankPdfBytes = await _generateBlankPDF();
-          _generatedProblems = await _apiService.generateProblems(
+          final result = await _apiService.generateProblems(
             pdfBytes: blankPdfBytes,
             params: _params!,
           );
+          _generatedProblems = result.problems;
+          _extractedText = result.extractedText;
         }
       }
 
@@ -155,10 +161,15 @@ class ProblemGeneratorProvider extends ChangeNotifier {
         }
       } else {
         final pdfBytes = additionalPDF?.bytes ?? _uploadedPDF?.bytes ?? await _generateBlankPDF();
-        newProblems = await _apiService.generateProblems(
+        final result = await _apiService.generateProblems(
           pdfBytes: pdfBytes,
           params: params,
         );
+        newProblems = result.problems;
+        // 追加生成でも抽出テキストを更新
+        if (result.extractedText != null) {
+          _extractedText = result.extractedText;
+        }
       }
 
       _generatedProblems.addAll(newProblems);

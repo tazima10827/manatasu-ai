@@ -339,6 +339,51 @@ class _ResultScreenState extends State<ResultScreen> {
                     },
                   ),
           ),
+          // PDF原文テキスト表示エリア
+          if (provider.extractedText != null && provider.extractedText!.isNotEmpty) ...[
+            Container(
+              margin: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                border: Border.all(color: Colors.grey[300]!),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.text_snippet, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'PDFから抽出されたテキスト（参考用）',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        provider.extractedText!,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontFamily: 'monospace',
+                          color: Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(

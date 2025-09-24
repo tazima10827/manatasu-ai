@@ -6,10 +6,20 @@ import '../models/problem_generation_params.dart';
 import '../models/generated_problem.dart';
 import '../utils/config.dart';
 
+class ProblemGenerationResult {
+  final List<GeneratedProblem> problems;
+  final String? extractedText;
+
+  ProblemGenerationResult({
+    required this.problems,
+    this.extractedText,
+  });
+}
+
 class ApiService {
   static const String baseUrl = Config.apiBaseUrl;
 
-  Future<List<GeneratedProblem>> generateProblems({
+  Future<ProblemGenerationResult> generateProblems({
     required Uint8List pdfBytes,
     required ProblemGenerationParams params,
   }) async {
@@ -63,7 +73,10 @@ class ApiService {
 
         print('Flutter: Generated problems: ${problems.map((p) => p.question).toList()}');
 
-        return problems;
+        return ProblemGenerationResult(
+          problems: problems,
+          extractedText: jsonResponse['extractedText'] as String?,
+        );
       } else {
         throw Exception('API Error: ${response.statusCode} - $responseBody');
       }
@@ -72,7 +85,7 @@ class ApiService {
     }
   }
 
-  Future<List<GeneratedProblem>> generateProblemsWithoutPdf({
+  Future<ProblemGenerationResult> generateProblemsWithoutPdf({
     required ProblemGenerationParams params,
   }) async {
     try {
@@ -117,7 +130,10 @@ class ApiService {
 
         print('Flutter: Generated problems: ${problems.map((p) => p.question).toList()}');
 
-        return problems;
+        return ProblemGenerationResult(
+          problems: problems,
+          extractedText: jsonResponse['extractedText'] as String?,
+        );
       } else {
         throw Exception('API Error: ${response.statusCode} - $responseBody');
       }
