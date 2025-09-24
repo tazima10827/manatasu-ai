@@ -1,10 +1,10 @@
 # MVP版Cloud Run設定 - コスト最適化
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/manatasu-ai-backend:mvp', '.']
+    args: ['build', '-t', 'gcr.io/manatasuai/manatasu-ai-backend:mvp', '.']
 
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'gcr.io/$PROJECT_ID/manatasu-ai-backend:mvp']
+    args: ['push', 'gcr.io/manatasuai/manatasu-ai-backend:mvp']
 
   - name: 'gcr.io/cloud-builders/gcloud'
     args:
@@ -12,7 +12,7 @@ steps:
       - 'deploy'
       - 'manatasu-ai-backend'
       - '--image'
-      - 'gcr.io/$PROJECT_ID/manatasu-ai-backend:mvp'
+      - 'gcr.io/manatasuai/manatasu-ai-backend:mvp'
       - '--region'
       - 'asia-northeast1'
       - '--platform'
@@ -32,7 +32,7 @@ steps:
       - '--timeout'
       - '300'            # 5分タイムアウト
       - '--set-env-vars'
-      - 'USE_MVP_RAG=true,GOOGLE_CLOUD_PROJECT=$PROJECT_ID'
+      - 'USE_MVP_RAG=true,GOOGLE_CLOUD_PROJECT=manatasuai'
 
 options:
   logging: CLOUD_LOGGING_ONLY
