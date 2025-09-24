@@ -3,12 +3,12 @@ class Config {
 
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:8080/api',
+    defaultValue: 'https://manatasu-ai-backend-676pzc6mla-an.a.run.app/api',
   );
 
   static const String apiKey = String.fromEnvironment(
     'API_KEY',
-    defaultValue: '',
+    defaultValue: 'production-api-key-secure-2024',
   );
 
   static const String vertexAiProjectId = String.fromEnvironment(

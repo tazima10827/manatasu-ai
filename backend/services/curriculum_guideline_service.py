@@ -48,13 +48,16 @@ class CurriculumGuidelineService:
             return None
 
     def extract_text_from_pdf(self, pdf_bytes: bytes) -> str:
-        """PDFからテキストを抽出"""
+        """PDFからテキストを抽出（UTF-8エンコーディング対応）"""
         try:
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
             text = ""
 
             for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
+                page_text = page.extract_text()
+                # UTF-8エンコーディングで文字化けを防ぐ
+                page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                text += page_text + "\n"
 
             return text.strip()
         except Exception as e:

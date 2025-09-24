@@ -741,7 +741,7 @@ async def extract_pdf_text(
 
         return {
             "filename": pdf.filename,
-            "pageCount": len(pdf_reader.pages),
+            "pageCount": len(pages),
             "pages": pages
         }
 

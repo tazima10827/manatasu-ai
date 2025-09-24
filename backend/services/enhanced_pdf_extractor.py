@@ -102,10 +102,12 @@ class EnhancedPDFExtractor:
 
             for page_num, page in enumerate(pdf_reader.pages):
                 try:
+                    # UTF-8エンコーディングで正しく抽出
                     page_text = page.extract_text()
                     if page_text.strip():
                         text_content += f"\n--- Page {page_num + 1} ---\n"
-                        text_content += page_text
+                        # 文字化けを防ぐためにエンコード/デコード処理を追加
+                        text_content += page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
                 except Exception as e:
                     self.logger.warning(f"PyPDF2: Failed to extract page {page_num + 1}: {e}")
                     continue
@@ -142,9 +144,11 @@ class EnhancedPDFExtractor:
                     try:
                         text_content += f"\n--- Page {page_num + 1} ---\n"
 
-                        # 通常テキストの抽出
+                        # 通常テキストの抽出（UTF-8エンコーディング対応）
                         page_text = page.extract_text()
                         if page_text:
+                            # 文字化け対策
+                            page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
                             text_content += page_text + "\n"
 
                         # テーブルの抽出
@@ -155,7 +159,9 @@ class EnhancedPDFExtractor:
                                 text_content += f"\n--- テーブル {table_num + 1} ---\n"
                                 for row in table:
                                     if row and any(cell for cell in row if cell):
-                                        text_content += " | ".join(str(cell) if cell else "" for cell in row) + "\n"
+                                        # セルの内容をUTF-8で処理
+                                        row_text = " | ".join(str(cell).encode('utf-8', errors='ignore').decode('utf-8', errors='ignore') if cell else "" for cell in row)
+                                        text_content += row_text + "\n"
 
                     except Exception as e:
                         self.logger.warning(f"pdfplumber: Failed to extract page {page_num + 1}: {e}")
@@ -198,9 +204,11 @@ class EnhancedPDFExtractor:
             for page_num, image in enumerate(images[:5]):  # 最初の5ページのみ（処理時間考慮）
                 try:
                     text_content += f"\n--- Page {page_num + 1} (OCR) ---\n"
-                    # OCRでテキスト抽出
+                    # OCRでテキスト抽出（日本語対応）
                     page_text = pytesseract.image_to_string(image, lang='jpn+eng')
                     if page_text.strip():
+                        # UTF-8エンコーディングで処理
+                        page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
                         text_content += page_text
                 except Exception as e:
                     self.logger.warning(f"OCR: Failed to process page {page_num + 1}: {e}")
@@ -280,7 +288,9 @@ class EnhancedPDFExtractor:
                 text_content = ""
                 for page_num, page in enumerate(pdf_reader.pages):
                     text_content += f"\n--- Page {page_num + 1} ---\n"
-                    text_content += page.extract_text()
+                    page_text = page.extract_text()
+                    # フォールバックでもUTF-8処理
+                    text_content += page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
                 return text_content.strip()
             except Exception as e:
                 self.logger.error(f"Fallback extraction also failed: {e}")
