@@ -298,7 +298,10 @@ async def generate_problems(
                 batch.set(doc_ref, problem.dict())
             batch.commit()
 
-        return {"problems": [p.dict() for p in problems]}
+        return {
+            "problems": [p.dict() for p in problems],
+            "extractedText": text_content
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -510,7 +513,10 @@ async def generate_problems_base64(
                 batch.set(doc_ref, problem.dict())
             batch.commit()
 
-        return {"problems": [p.dict() for p in problems]}
+        return {
+            "problems": [p.dict() for p in problems],
+            "extractedText": text_content
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -705,7 +711,10 @@ async def generate_problems_without_pdf(
                 batch.set(doc_ref, problem.dict())
             batch.commit()
 
-        return {"problems": [p.dict() for p in problems]}
+        return {
+            "problems": [p.dict() for p in problems],
+            "extractedText": text_content
+        }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
