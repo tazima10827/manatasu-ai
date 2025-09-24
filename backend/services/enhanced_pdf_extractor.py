@@ -106,8 +106,9 @@ class EnhancedPDFExtractor:
                     page_text = page.extract_text()
                     if page_text.strip():
                         text_content += f"\n--- Page {page_num + 1} ---\n"
-                        # 文字化けを防ぐためにエンコード/デコード処理を追加
-                        text_content += page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                        # 強化されたエンコーディング修正を適用
+                        fixed_text = self._fix_encoding_issues(page_text)
+                        text_content += fixed_text
                 except Exception as e:
                     self.logger.warning(f"PyPDF2: Failed to extract page {page_num + 1}: {e}")
                     continue
@@ -147,9 +148,9 @@ class EnhancedPDFExtractor:
                         # 通常テキストの抽出（UTF-8エンコーディング対応）
                         page_text = page.extract_text()
                         if page_text:
-                            # 文字化け対策
-                            page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                            text_content += page_text + "\n"
+                            # 強化されたエンコーディング修正を適用
+                            fixed_text = self._fix_encoding_issues(page_text)
+                            text_content += fixed_text + "\n"
 
                         # テーブルの抽出
                         tables = page.extract_tables()
@@ -159,8 +160,16 @@ class EnhancedPDFExtractor:
                                 text_content += f"\n--- テーブル {table_num + 1} ---\n"
                                 for row in table:
                                     if row and any(cell for cell in row if cell):
-                                        # セルの内容をUTF-8で処理
-                                        row_text = " | ".join(str(cell).encode('utf-8', errors='ignore').decode('utf-8', errors='ignore') if cell else "" for cell in row)
+                                        # セルの内容を強化エンコーディング修正で処理
+                                        cells_fixed = []
+                                        for cell in row:
+                                            if cell:
+                                                cell_str = str(cell)
+                                                fixed_cell = self._fix_encoding_issues(cell_str)
+                                                cells_fixed.append(fixed_cell)
+                                            else:
+                                                cells_fixed.append("")
+                                        row_text = " | ".join(cells_fixed)
                                         text_content += row_text + "\n"
 
                     except Exception as e:
@@ -207,9 +216,9 @@ class EnhancedPDFExtractor:
                     # OCRでテキスト抽出（日本語対応）
                     page_text = pytesseract.image_to_string(image, lang='jpn+eng')
                     if page_text.strip():
-                        # UTF-8エンコーディングで処理
-                        page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                        text_content += page_text
+                        # 強化されたエンコーディング修正を適用
+                        fixed_text = self._fix_encoding_issues(page_text)
+                        text_content += fixed_text
                 except Exception as e:
                     self.logger.warning(f"OCR: Failed to process page {page_num + 1}: {e}")
                     continue
@@ -232,6 +241,96 @@ class EnhancedPDFExtractor:
         except Exception as e:
             self.logger.error(f"OCR extraction failed: {e}")
             return None
+
+    def _fix_encoding_issues(self, text: str) -> str:
+        """
+        PDFから抽出されたテキストのエンコーディング問題を修正
+
+        Args:
+            text: 抽出されたテキスト
+
+        Returns:
+            str: エンコーディング修正されたテキスト
+        """
+        if not text:
+            return text
+
+        # 複数のエンコーディング修正を試行
+        fixed_text = text
+
+        try:
+            # 方法1: Latin-1として誤解釈されたUTF-8を修正
+            if any(ord(c) > 127 for c in text):  # 非ASCII文字が含まれている場合
+                try:
+                    # Latin-1でエンコードしてUTF-8でデコード
+                    fixed_text = text.encode('latin-1').decode('utf-8', errors='ignore')
+                    self.logger.debug(f"Fixed with Latin-1->UTF-8: {text[:20]} -> {fixed_text[:20]}")
+                    if self._is_readable_japanese(fixed_text):
+                        return fixed_text
+                except (UnicodeError, UnicodeDecodeError):
+                    pass
+
+            # 方法2: CP1252として誤解釈されたUTF-8を修正
+            try:
+                fixed_text = text.encode('cp1252').decode('utf-8', errors='ignore')
+                if self._is_readable_japanese(fixed_text):
+                    self.logger.debug(f"Fixed with CP1252->UTF-8: {text[:20]} -> {fixed_text[:20]}")
+                    return fixed_text
+            except (UnicodeError, UnicodeDecodeError):
+                pass
+
+            # 方法3: 各種エンコーディングを試行
+            encodings_to_try = ['shift_jis', 'euc-jp', 'iso-2022-jp', 'utf-16']
+            for encoding in encodings_to_try:
+                try:
+                    if isinstance(text, str):
+                        # 文字列をバイトに変換してからデコード
+                        text_bytes = text.encode('latin-1', errors='ignore')
+                        fixed_text = text_bytes.decode(encoding, errors='ignore')
+                        if self._is_readable_japanese(fixed_text):
+                            self.logger.debug(f"Fixed with {encoding}: {text[:20]} -> {fixed_text[:20]}")
+                            return fixed_text
+                except (UnicodeError, UnicodeDecodeError):
+                    continue
+
+        except Exception as e:
+            self.logger.warning(f"Encoding fix failed: {e}")
+
+        # すべての修正が失敗した場合、元のテキストを返す
+        return text
+
+    def _is_readable_japanese(self, text: str) -> bool:
+        """
+        テキストが読み取り可能な日本語かどうかを判定
+
+        Args:
+            text: 判定するテキスト
+
+        Returns:
+            bool: 読み取り可能な日本語の場合True
+        """
+        if not text or len(text) < 3:
+            return False
+
+        # 日本語文字（ひらがな、カタカナ、漢字）の存在をチェック
+        japanese_chars = 0
+        total_chars = 0
+
+        for char in text:
+            if char.isalpha() or ord(char) > 127:
+                total_chars += 1
+                # ひらがな (U+3040-U+309F)
+                if 0x3040 <= ord(char) <= 0x309F:
+                    japanese_chars += 1
+                # カタカナ (U+30A0-U+30FF)
+                elif 0x30A0 <= ord(char) <= 0x30FF:
+                    japanese_chars += 1
+                # CJK統合漢字 (U+4E00-U+9FFF)
+                elif 0x4E00 <= ord(char) <= 0x9FFF:
+                    japanese_chars += 1
+
+        # 日本語文字の割合が30%以上なら読み取り可能と判定
+        return total_chars > 0 and (japanese_chars / total_chars) >= 0.3
 
     def _calculate_text_confidence(self, text: str) -> float:
         """
@@ -289,8 +388,9 @@ class EnhancedPDFExtractor:
                 for page_num, page in enumerate(pdf_reader.pages):
                     text_content += f"\n--- Page {page_num + 1} ---\n"
                     page_text = page.extract_text()
-                    # フォールバックでもUTF-8処理
-                    text_content += page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                    # フォールバックでも強化エンコーディング修正
+                    fixed_text = self._fix_encoding_issues(page_text)
+                    text_content += fixed_text
                 return text_content.strip()
             except Exception as e:
                 self.logger.error(f"Fallback extraction also failed: {e}")

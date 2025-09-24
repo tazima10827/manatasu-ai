@@ -34,6 +34,53 @@ class CurriculumGuidelineService:
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
+    def _fix_encoding_issues(self, text: str) -> str:
+        """PDFから抽出されたテキストのエンコーディング問題を修正"""
+        if not text:
+            return text
+
+        try:
+            # Latin-1として誤解釈されたUTF-8を修正
+            if any(ord(c) > 127 for c in text):
+                try:
+                    fixed_text = text.encode('latin-1').decode('utf-8', errors='ignore')
+                    if self._is_readable_japanese(fixed_text):
+                        return fixed_text
+                except (UnicodeError, UnicodeDecodeError):
+                    pass
+
+            # CP1252として誤解釈されたUTF-8を修正
+            try:
+                fixed_text = text.encode('cp1252').decode('utf-8', errors='ignore')
+                if self._is_readable_japanese(fixed_text):
+                    return fixed_text
+            except (UnicodeError, UnicodeDecodeError):
+                pass
+
+        except Exception as e:
+            self.logger.warning(f"Encoding fix failed: {e}")
+
+        return text
+
+    def _is_readable_japanese(self, text: str) -> bool:
+        """テキストが読み取り可能な日本語かどうかを判定"""
+        if not text or len(text) < 3:
+            return False
+
+        japanese_chars = 0
+        total_chars = 0
+
+        for char in text:
+            if char.isalpha() or ord(char) > 127:
+                total_chars += 1
+                # ひらがな、カタカナ、漢字のチェック
+                if (0x3040 <= ord(char) <= 0x309F or  # ひらがな
+                    0x30A0 <= ord(char) <= 0x30FF or  # カタカナ
+                    0x4E00 <= ord(char) <= 0x9FFF):   # CJK統合漢字
+                    japanese_chars += 1
+
+        return total_chars > 0 and (japanese_chars / total_chars) >= 0.3
+
     def download_pdf_from_storage(self, blob_path: str) -> Optional[bytes]:
         """Cloud StorageからPDFファイルをダウンロード"""
         try:
@@ -55,9 +102,9 @@ class CurriculumGuidelineService:
 
             for page in pdf_reader.pages:
                 page_text = page.extract_text()
-                # UTF-8エンコーディングで文字化けを防ぐ
-                page_text = page_text.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
-                text += page_text + "\n"
+                # 強化されたエンコーディング修正を適用
+                fixed_text = self._fix_encoding_issues(page_text)
+                text += fixed_text + "\n"
 
             return text.strip()
         except Exception as e:
