@@ -69,3 +69,8 @@ firebase-debug.log
 # Google Cloud
 gcloud/
 .gcloudignore
+
+# Curriculum guidelines (PDF files - do not commit to GitHub)
+中学校/
+**/中学校/
+**/*.pdf

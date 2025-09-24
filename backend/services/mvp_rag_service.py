@@ -11,6 +11,7 @@ import hashlib
 from google.cloud import firestore
 import vertexai
 from vertexai.generative_models import GenerativeModel
+from .curriculum_guideline_service import CurriculumGuidelineService
 
 class MVPRAGService:
     """
@@ -31,6 +32,9 @@ class MVPRAGService:
         # インメモリキャッシュ（簡易版）
         self.cache = {}
         self.cache_expiry = {}
+
+        # 学習指導要領サービスを初期化
+        self.curriculum_service = CurriculumGuidelineService(project_id)
 
         # コスト最適化設定
         self.config = {
@@ -67,24 +71,49 @@ class MVPRAGService:
             print("Warning: Firestore not initialized. Returning empty results.")
             return results
 
-        # 1. 指導要領を検索
-        guidelines_query = self.db.collection('guidelines')
-        guidelines_query = guidelines_query.where('subject', '==', subject)
+        # 1. 学習指導要領を検索（新しいサービスを使用）
+        if topic:
+            # トピック指定がある場合は検索
+            curriculum_results = self.curriculum_service.search_guidelines(
+                query=topic, subject=subject, grade=grade
+            )
+        else:
+            # トピック指定がない場合は教科の指導要領を取得
+            curriculum_data = self.curriculum_service.get_guidelines_for_subject(subject, grade)
+            curriculum_results = [curriculum_data] if curriculum_data else []
 
-        for doc in guidelines_query.stream():
-            data = doc.to_dict()
-            if self._is_relevant_grade(grade, data.get('grade', '')):
-                # 関連度スコアを簡易計算
-                score = self._calculate_relevance_score(topic, data)
+        # 学習指導要領結果を追加
+        for curriculum in curriculum_results:
+            if curriculum:
+                content = self._format_curriculum_content(curriculum)
+                score = curriculum.get('score', 1.5)  # 学習指導要領は高いスコア
                 results.append({
-                    'id': doc.id,
-                    'type': 'guideline',
-                    'content': self._format_guideline_content(data),
+                    'id': curriculum.get('id', f"curriculum_{subject}"),
+                    'type': 'curriculum_guideline',
+                    'content': content,
                     'score': score,
-                    'metadata': data
+                    'metadata': curriculum
                 })
 
-        # 2. 過去の生成問題を検索（類似問題の参考用）
+        # 2. 従来の指導要領検索（下位互換性のため）
+        if len(results) < limit:
+            guidelines_query = self.db.collection('guidelines')
+            guidelines_query = guidelines_query.where('subject', '==', subject)
+
+            for doc in guidelines_query.stream():
+                data = doc.to_dict()
+                if self._is_relevant_grade(grade, data.get('grade', '')):
+                    # 関連度スコアを簡易計算
+                    score = self._calculate_relevance_score(topic, data)
+                    results.append({
+                        'id': doc.id,
+                        'type': 'guideline',
+                        'content': self._format_guideline_content(data),
+                        'score': score,
+                        'metadata': data
+                    })
+
+        # 3. 過去の生成問題を検索（類似問題の参考用）
         if len(results) < limit:
             problems_query = self.db.collection('generated_problems').limit(20)
             problems_query = problems_query.where('subject', '==', subject)
@@ -111,7 +140,8 @@ class MVPRAGService:
                          problem_count: int,
                          problem_type: str,
                          pdf_content: str = "",
-                         specific_topic: Optional[str] = None) -> Dict:
+                         specific_topic: Optional[str] = None,
+                         filename: Optional[str] = None) -> Dict:
         """
         RAGを使用して問題を生成（MVP版）
 
@@ -157,8 +187,9 @@ class MVPRAGService:
             problem_count=problem_count,
             problem_type=problem_type,
             relevant_docs=relevant_docs,
-            pdf_content=pdf_content[:5000],  # PDFコンテンツを制限
-            specific_topic=specific_topic
+            pdf_content=pdf_content[:15000],  # PDFコンテンツを大幅に拡張
+            specific_topic=specific_topic,
+            filename=filename
         )
 
         # トークン数を確認（コスト管理）
@@ -188,6 +219,11 @@ class MVPRAGService:
             # レスポンスを解析
             result = self._parse_response(response.text)
 
+            # ファイル名情報を追加
+            if filename and pdf_content and result.get('problems'):
+                for problem in result['problems']:
+                    problem['source'] = filename
+
             # キャッシュに保存
             self._save_to_cache(cache_key, result)
 
@@ -205,7 +241,26 @@ class MVPRAGService:
 
     def _build_mvp_prompt(self, **kwargs) -> str:
         """MVP版プロンプトを構築"""
-        prompt = f"""
+
+        # PDF内容がある場合は最優先で扱う
+        if pdf_content := kwargs.get('pdf_content'):
+            filename = kwargs.get('filename', 'document.pdf')
+            prompt = f"""
+あなたは日本の教育専門家です。
+
+【重要: 必ずアップロードされたPDFファイルの内容を基に問題を作成してください】
+
+=== 主要参考資料（最優先） ===
+--- アップロードされたPDF: {filename} ---
+{pdf_content[:8000]}  # PDFコンテンツを8000文字まで拡張
+
+上記PDFファイルの内容から、具体的な問題、例題、テーマ、コンセプトを抽出し、
+それらを直接参考にして問題を作成してください。
+
+【追加参考情報】
+"""
+        else:
+            prompt = f"""
 あなたは日本の教育専門家です。以下の情報を参考に問題を生成してください。
 
 【参考情報】
@@ -218,13 +273,6 @@ class MVPRAGService:
 {doc['content'][:1000]}  # 各参考情報を1000文字に制限
 """
 
-        # PDF内容を追加（ある場合）
-        if pdf_content := kwargs.get('pdf_content'):
-            prompt += f"""
---- アップロードされたPDF ---
-{pdf_content[:2000]}  # 2000文字に制限
-"""
-
         prompt += f"""
 
 【生成条件】
@@ -235,10 +283,13 @@ class MVPRAGService:
 - 問題形式: {kwargs.get('problem_type')}
 {f"- トピック: {kwargs.get('specific_topic')}" if kwargs.get('specific_topic') else ""}
 
-【注意事項】
-- 簡潔で明確な問題を作成
-- 学習指導要領に準拠
-- JSON形式で出力
+【重要な制約と注意事項】
+1. 🚨 PDFファイルがアップロードされている場合は、必ずそのPDF内容を直接参考にして問題を作成してください
+2. 📚 PDF内の例題、問題、図表、概念を積極的に活用してください
+3. 🎯 PDF内容に関連する具体的な問題を生成し、一般的な問題は避けてください
+4. 📖 PDF内のテキスト、数式、データがある場合はそれらを問題に組み込んでください
+5. ✅ 学習指導要領に準拠しつつ、PDF内容を最優先で反映してください
+6. 📝 JSON形式で出力してください
 
 以下の形式で出力してください：
 {{
@@ -307,6 +358,28 @@ class MVPRAGService:
 問題: {data.get('question', '')[:200]}
 答え: {data.get('answer', '')[:100]}
 """
+
+    def _format_curriculum_content(self, data: Dict) -> str:
+        """学習指導要領コンテンツをフォーマット"""
+        content = f"【{data.get('subject', '')} 学習指導要領】\n"
+
+        # 学年情報
+        if grade_levels := data.get('grade_levels'):
+            content += f"対象学年: {', '.join(grade_levels)}\n"
+
+        # 学習目標
+        if learning_goals := data.get('learning_goals'):
+            content += f"学習目標: {learning_goals[0][:100] if learning_goals else ''}\n"
+
+        # トピック
+        if topics := data.get('topics'):
+            content += f"主要トピック: {', '.join(topics[:5])}\n"
+
+        # キーワード
+        if keywords := data.get('keywords'):
+            content += f"重要キーワード: {', '.join(keywords[:8])}\n"
+
+        return content[:800]  # 800文字に制限
 
     def _generate_cache_key(self, params: Dict) -> str:
         """キャッシュキーを生成"""

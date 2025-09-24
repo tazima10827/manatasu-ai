@@ -16,6 +16,7 @@ from vertexai.generative_models import GenerativeModel, Part
 from dotenv import load_dotenv
 from services.guidelines_service import GuidelinesService
 from services.mvp_rag_service import MVPRAGService
+from services.enhanced_pdf_extractor import EnhancedPDFExtractor
 import base64
 
 load_dotenv()
@@ -106,14 +107,11 @@ async def generate_problems(
 
         pdf_content = await pdf.read()
 
-        from io import BytesIO
-        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
-        text_content = ""
-        for page_num, page in enumerate(pdf_reader.pages):
-            text_content += f"\n--- Page {page_num + 1} ---\n"
-            text_content += page.extract_text()
+        # Enhanced PDF text extraction
+        extractor = EnhancedPDFExtractor()
+        text_content = extractor.extract_with_fallback(pdf_content, pdf.filename)
 
-        print(f"Extracted PDF content length: {len(text_content)}")
+        print(f"Enhanced extracted PDF content length: {len(text_content)}")
         print(f"PDF content preview: {text_content[:200]}...")
 
         # MVP版RAGを使用するかチェック
@@ -130,7 +128,8 @@ async def generate_problems(
                     problem_count=problem_params.problemCount,
                     problem_type=problem_params.problemType,
                     pdf_content=text_content,
-                    specific_topic=problem_params.specificTopic
+                    specific_topic=problem_params.specificTopic,
+                    filename=pdf.filename
                 )
 
                 # 結果から問題を抽出
@@ -321,12 +320,9 @@ async def generate_problems_base64(
 
         problem_params = request.params
 
-        from io import BytesIO
-        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
-        text_content = ""
-        for page_num, page in enumerate(pdf_reader.pages):
-            text_content += f"\n--- Page {page_num + 1} ---\n"
-            text_content += page.extract_text()
+        # Enhanced PDF text extraction for Base64 request
+        extractor = EnhancedPDFExtractor()
+        text_content = extractor.extract_with_fallback(pdf_content, request.filename)
 
         print(f"Base64 PDF content length: {len(text_content)}")
         print(f"Base64 PDF content preview: {text_content[:200]}...")
@@ -345,7 +341,8 @@ async def generate_problems_base64(
                     problem_count=problem_params.problemCount,
                     problem_type=problem_params.problemType,
                     pdf_content=text_content,
-                    specific_topic=problem_params.specificTopic
+                    specific_topic=problem_params.specificTopic,
+                    filename=request.filename
                 )
 
                 # 結果から問題を抽出
@@ -720,14 +717,27 @@ async def extract_pdf_text(
 ):
     try:
         pdf_content = await pdf.read()
-        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
 
+        # Enhanced PDF text extraction for extract-pdf endpoint
+        extractor = EnhancedPDFExtractor()
+        extracted_content = extractor.extract_text_from_pdf(pdf_content, pdf.filename)
+
+        # Parse the text content into pages for backward compatibility
         pages = []
-        for page_num, page in enumerate(pdf_reader.pages):
-            pages.append({
-                "page": page_num + 1,
-                "text": page.extract_text()
-            })
+        if extracted_content.text:
+            # Split by page markers if they exist
+            page_sections = extracted_content.text.split('--- Page ')
+            for i, section in enumerate(page_sections[1:], 1):  # Skip first empty split
+                # Remove page number from section
+                if ' ---' in section:
+                    page_text = section.split(' ---', 1)[1].strip()
+                else:
+                    page_text = section.strip()
+
+                pages.append({
+                    "page": i,
+                    "text": page_text
+                })
 
         return {
             "filename": pdf.filename,
